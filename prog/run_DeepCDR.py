@@ -21,8 +21,8 @@ from keras import optimizers,utils
 from keras.constraints import max_norm
 from keras import regularizers
 from keras.callbacks import ModelCheckpoint,Callback,EarlyStopping,History
-from keras.utils import multi_gpu_model,plot_model
-from keras.optimizers import Adam, SGD
+from keras.utils import plot_model
+from keras.optimizers.legacy import Adam, SGD
 from keras.models import model_from_json
 import tensorflow as tf
 from sklearn.metrics import average_precision_score
@@ -33,7 +33,7 @@ import scipy.sparse as sp
 import argparse
 ####################################Settings#################################
 parser = argparse.ArgumentParser(description='Drug_response_pre')
-parser.add_argument('-model', dest='model', type=str, default='GCN', help='model')
+parser.add_argument('-model', dest='model', type=str, default='MPNN', help='model')
 parser.add_argument('-gpu_id', dest='gpu_id', type=str, default='0', help='GPU devices')
 parser.add_argument('-use_mut', dest='use_mut', type=bool, default=True, help='use gene mutation or not')
 parser.add_argument('-use_gexp', dest='use_gexp', type=bool, default=True, help='use gene expression or not')
@@ -238,7 +238,7 @@ class MyCallback(Callback):
 
 
 def ModelTraining(model,X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,validation_data,nb_epoch=100):
-    optimizer = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
+    optimizer = Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, amsgrad=False)
     model.compile(optimizer = optimizer,loss='mean_squared_error',metrics=['mse'])
     #EarlyStopping(monitor='val_loss',patience=5)
     callbacks = [ModelCheckpoint('../checkpoint/best_DeepCDR_%s.h5'%model_suffix,monitor='val_loss',save_best_only=False, save_weights_only=False),
@@ -278,7 +278,7 @@ def main():
     if args.model == 'GCN':
         model = KerasMultiSourceGCNModel(use_mut,use_gexp,use_methy).createMaster(X_drug_data_train[0][0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
     elif args.model == 'MPNN':
-        model = MessagePassingNeuralNetwork(use_mut,use_gexp,use_methy).createMaster(X_drug_data_train[0][0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
+        model = MessagePassingNeuralNetwork(use_mut,use_gexp,use_methy).create_master(X_drug_data_train[0][0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
 
     print('Begin training...')
     model = ModelTraining(model,X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,validation_data,nb_epoch=500)

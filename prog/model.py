@@ -1,15 +1,15 @@
 import keras.backend as K
 from keras.models import Model, Sequential
-from keras.layers import Input,InputLayer,Multiply,ZeroPadding2D
-from keras.layers import Conv2D, MaxPooling2D,Conv1D,MaxPooling1D
-from keras.layers import Dense,Activation,Dropout,Flatten,Concatenate
+from keras.layers import Input, InputLayer, Multiply, ZeroPadding2D
+from keras.layers import Conv2D, MaxPooling2D, Conv1D, MaxPooling1D
+from keras.layers import Dense, Activation, Dropout, Flatten, Concatenate
 from keras.layers import BatchNormalization
 from keras.layers import Lambda
-from keras.layers import Dropout,GlobalMaxPooling1D,GlobalAveragePooling1D
+from keras.layers import Dropout, GlobalMaxPooling1D, GlobalAveragePooling1D
 from keras.models import Model
 from keras.optimizers import Adam
 from keras.regularizers import l2
-from layers.graph import GraphLayer,GraphConv
+from layers.graph import GraphLayer, GraphConv, MPNNLayer
 
 from tensorflow.keras.layers import Input, Dense, BatchNormalization, Concatenate
 from tensorflow.keras.models import Model
@@ -26,15 +26,17 @@ class MessagePassingNeuralNetwork:
         self.use_methy = use_methy
         self.regr = regr
 
-    def create_master(self, drug_dim, mutation_dim, gexpr_dim, methy_dim, mp_count=2,):
-        drug_features = Input(shape=(None, drug_dim), name='drug_feat_input')
+    def create_master(self, drug_dim, mutation_dim, gexpr_dim, methy_dim, units_list, use_relu=True, use_bn=True, use_GMP=True, mp_count=2,):
+        drug_feat_input = Input(shape=(None, drug_dim), name='drug_feat_input')
         drug_adj_input = Input(shape=(None, None), name='drug_adj_input')
         mutation_input = Input(shape=(1, mutation_dim, 1), name='mutation_feat_input')
         gexpr_input = Input(shape=(gexpr_dim,), name='gexpr_feat_input')
         methy_input = Input(shape=(methy_dim,), name='methy_feat_input')
 
-        for i in range(mp_count):
-            drug_features = MPNNLayer(activation='relu')(drug_features, drug_adj_input)
+        drug_features = MPNNLayer(activation='relu')([drug_feat_input, drug_adj_input])
+
+        for i in range(mp_count - 1):
+            drug_features = MPNNLayer(activation='relu')([drug_features, drug_adj_input])
         x = GlobalAveragePooling1D()(drug_features)
 
         # genomic mutation feature
@@ -86,6 +88,7 @@ class MessagePassingNeuralNetwork:
 
         model = Model(inputs=[drug_feat_input, drug_adj_input, mutation_input, gexpr_input, methy_input],
                       outputs=output)
+        model.summary()
 
         # Compile model
         model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])

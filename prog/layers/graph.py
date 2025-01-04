@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from keras import activations, initializers, constraints
 from keras import regularizers
-from keras.engine import Layer
+from keras.layers import Layer
 import keras.backend as K
 
 
@@ -37,8 +37,9 @@ class MPNNLayer(Layer):
         super(MPNNLayer, self).build(input_shape)
 
     def _aggregate(self, node_features, adjacency_matrix):
-        messages = K.dot(adjacency_matrix, node_features)
-        return K.dot(messages, self.W_message)
+        messages = K.batch_dot(K.permute_dimensions(adjacency_matrix, (0, 2, 1)), node_features)
+        aggregated_messages = K.dot(messages, self.W_message)
+        return aggregated_messages
 
     def _update(self, aggregated_messages, node_features):
         combined_features = K.concatenate([aggregated_messages, node_features], axis=-1)
