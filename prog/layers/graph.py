@@ -8,6 +8,59 @@ import keras.backend as K
 
 import keras
 
+import tensorflow.keras.backend as K
+from tensorflow.keras import activations
+from tensorflow.keras.layers import Layer, Dense
+
+
+class MPNNLayer(Layer):
+    def __init__(self, activation=None, hidden_units=128, **kwargs):
+        super(MPNNLayer, self).__init__(**kwargs)
+        self.activation = activations.get(activation)
+        self.hidden_units = hidden_units
+
+    def build(self, input_shape):
+        node_feature_dim = input_shape[0][-1]
+
+        self.W_message = self.add_weight(
+            shape=(node_feature_dim, node_feature_dim),
+            initializer="glorot_uniform",
+            trainable=True,
+            name="W_message"
+        )
+
+        self.update_network = keras.Sequential([
+            Dense(self.hidden_units, activation="relu"),
+            Dense(node_feature_dim)
+        ])
+
+        super(MPNNLayer, self).build(input_shape)
+
+    def _aggregate(self, node_features, adjacency_matrix):
+        messages = K.dot(adjacency_matrix, node_features)
+        return K.dot(messages, self.W_message)
+
+    def _update(self, aggregated_messages, node_features):
+        combined_features = K.concatenate([aggregated_messages, node_features], axis=-1)
+        updated_features = self.update_network(combined_features)
+        return updated_features
+
+    def call(self, inputs, **kwargs):
+        node_features, adjacency_matrix = inputs
+
+        aggregated_messages = self._aggregate(node_features, adjacency_matrix)
+        updated_node_features = self._update(aggregated_messages, node_features)
+
+        return updated_node_features
+
+    def get_config(self):
+        config = super(MPNNLayer, self).get_config()
+        config.update({
+            "activation": activations.serialize(self.activation),
+            "hidden_units": self.hidden_units
+        })
+        return config
+
 
 class GraphLayer(keras.layers.Layer):
 
@@ -147,8 +200,8 @@ class GraphConv(GraphLayer):
             features += self.b
         if self.step_num > 1:
             edges = self._get_walked_edges(edges, self.step_num)
-        return K.batch_dot(K.permute_dimensions(edges, (0, 2, 1)), features) #\
-           # / (K.sum(edges, axis=2, keepdims=True) + K.epsilon())
+        return K.batch_dot(K.permute_dimensions(edges, (0, 2, 1)), features) \
+           / (K.sum(edges, axis=2, keepdims=True) + K.epsilon())
 
 
 class GraphPool(GraphLayer):
