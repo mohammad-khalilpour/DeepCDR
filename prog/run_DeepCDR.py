@@ -46,7 +46,6 @@ parser.add_argument('-use_relu', dest='use_relu', type=bool, default=True, help=
 parser.add_argument('-use_GMP', dest='use_GMP', type=bool, help='use GlobalMaxPooling for GCN')
 args = parser.parse_args()
 
-os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 use_mut,use_gexp,use_methy = args.use_mut,args.use_gexp, args.use_methy
 israndom=args.israndom
 model_suffix = ('with_mut' if use_mut else 'without_mut')+'_'+('with_gexp' if use_gexp else 'without_gexp')+'_'+('with_methy' if use_methy else 'without_methy')
@@ -69,6 +68,13 @@ Gene_expression_file = '%s/CCLE/genomic_expression_561celllines_697genes_demap_f
 Methylation_file = '%s/CCLE/genomic_methylation_561celllines_808genes_demap_features.csv'%DPATH
 Max_atoms = 100
 
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
 
 def MetadataGenerate(Drug_info_file,Cell_line_info_file,Genomic_mutation_file,Drug_feature_file,Gene_expression_file,Methylation_file,filtered):
     #drug_id --> pubchem_id
@@ -264,25 +270,45 @@ def ModelEvaluate(model,X_drug_data_test,X_mutation_data_test,X_gexpr_data_test,
 
 def main():
     random.seed(0)
-    mutation_feature, drug_feature,gexpr_feature,methylation_feature, data_idx = MetadataGenerate(Drug_info_file,Cell_line_info_file,Genomic_mutation_file,Drug_feature_file,Gene_expression_file,Methylation_file,False)
-    data_train_idx,data_test_idx = DataSplit(data_idx)
-    X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,cancer_type_train_list = FeatureExtract(data_train_idx,drug_feature,mutation_feature,gexpr_feature,methylation_feature)
-    X_drug_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test,Y_test,cancer_type_test_list = FeatureExtract(data_test_idx,drug_feature,mutation_feature,gexpr_feature,methylation_feature)
+    with tf.device('/gpu:0'):
+        mutation_feature, drug_feature,gexpr_feature,methylation_feature, data_idx = MetadataGenerate(Drug_info_file,Cell_line_info_file,Genomic_mutation_file,Drug_feature_file,Gene_expression_file,Methylation_file,False)
+        data_train_idx,data_test_idx = DataSplit(data_idx)
+        X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,cancer_type_train_list = FeatureExtract(data_train_idx,drug_feature,mutation_feature,gexpr_feature,methylation_feature)
+        X_drug_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test,Y_test,cancer_type_test_list = FeatureExtract(data_test_idx,drug_feature,mutation_feature,gexpr_feature,methylation_feature)
 
-    X_drug_feat_data_test = [item[0] for item in X_drug_data_test]
-    X_drug_adj_data_test = [item[1] for item in X_drug_data_test]
-    X_drug_feat_data_test = np.array(X_drug_feat_data_test)
-    X_drug_adj_data_test = np.array(X_drug_adj_data_test)
-    
-    validation_data = [[X_drug_feat_data_test,X_drug_adj_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test],Y_test]
-    if args.model == 'GCN':
-        model = KerasMultiSourceGCNModel(use_mut,use_gexp,use_methy).createMaster(X_drug_data_train[0][0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
-    elif args.model == 'MPNN':
-        model = MessagePassingNeuralNetwork(use_mut,use_gexp,use_methy).create_master(X_drug_data_train[0][0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
+        X_drug_feat_data_test = [item[0] for item in X_drug_data_test]
+        X_drug_adj_data_test = [item[1] for item in X_drug_data_test]
+        X_drug_feat_data_test = np.array(X_drug_feat_data_test)
+        X_drug_adj_data_test = np.array(X_drug_adj_data_test)
 
-    print('Begin training...')
-    model = ModelTraining(model,X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,validation_data,nb_epoch=500)
-    ModelEvaluate(model,X_drug_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test,Y_test,cancer_type_test_list,'%s/DeepCDR_%s.log'%(DPATH,model_suffix))
+    with tf.device('/cpu:0'):
+
+        X_drug_feat_data_train = [item[0] for item in X_drug_data_train]
+        X_drug_feat_data_train = tf.convert_to_tensor(X_drug_feat_data_train, dtype=tf.float32)
+        X_mutation_data_train = tf.convert_to_tensor(X_mutation_data_train, dtype=tf.float32)
+        X_gexpr_data_train = tf.convert_to_tensor(X_gexpr_data_train, dtype=tf.float32)
+        X_methylation_data_train = tf.convert_to_tensor(X_methylation_data_train, dtype=tf.float32)
+        Y_train = tf.convert_to_tensor(Y_train, dtype=tf.float32)
+
+        X_drug_feat_data_test = tf.convert_to_tensor(X_drug_feat_data_test, dtype=tf.float32)
+        X_drug_adj_data_test = tf.convert_to_tensor(X_drug_adj_data_test, dtype=tf.float32)
+        X_mutation_data_test = tf.convert_to_tensor(X_mutation_data_test, dtype=tf.float32)
+        X_gexpr_data_test = tf.convert_to_tensor(X_gexpr_data_test, dtype=tf.float32)
+        X_methylation_data_test = tf.convert_to_tensor(X_methylation_data_test, dtype=tf.float32)
+        Y_test = tf.convert_to_tensor(Y_test, dtype=tf.float32)
+
+        validation_data = [[X_drug_feat_data_test,X_drug_adj_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test],Y_test]
+
+    with tf.device('/gpu:0'):
+
+        if args.model == 'GCN':
+            model = KerasMultiSourceGCNModel(use_mut,use_gexp,use_methy).createMaster(X_drug_feat_data_train[0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
+        elif args.model == 'MPNN':
+            model = MessagePassingNeuralNetwork(use_mut,use_gexp,use_methy).create_master(X_drug_feat_data_train[0].shape[-1],X_mutation_data_train.shape[-2],X_gexpr_data_train.shape[-1],X_methylation_data_train.shape[-1],args.unit_list,args.use_relu,args.use_bn,args.use_GMP)
+
+        print('Begin training...')
+        model = ModelTraining(model,X_drug_data_train,X_mutation_data_train,X_gexpr_data_train,X_methylation_data_train,Y_train,validation_data,nb_epoch=500)
+        ModelEvaluate(model,X_drug_data_test,X_mutation_data_test,X_gexpr_data_test,X_methylation_data_test,Y_test,cancer_type_test_list,'%s/DeepCDR_%s.log'%(DPATH,model_suffix))
 
 if __name__=='__main__':
     main()
